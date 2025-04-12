@@ -1,0 +1,54 @@
+name: Admin.Client.Cleanup.After.Upgrade.Artifact.Executable
+author: https://github.com/DrPwner
+description: |
+  Removes a specified executable from a given path on Windows systems.
+  
+  This artifact provides a flexible way to clean up executable files 
+  after installation or other operations.
+  
+  WARNING: Use with caution as this will permanently delete the specified file.
+type: CLIENT
+parameters:
+  - name: ExecutablePath
+    type: string
+    description: Full path to the executable file to be deleted
+  
+  - name: Force
+    type: bool
+    description: Force delete the file even if it's in use
+    default: false
+sources:
+  - query: |
+      -- Validate the path exists
+      LET path_check = SELECT 
+          OSPath, 
+          size, 
+          basename(path=OSPath) AS FileName
+      FROM stat(filename=ExecutablePath)
+      
+      -- Check if path is specified
+      LET _ = IF(condition=NOT ExecutablePath,
+                 then=throw(message="ExecutablePath must be specified"))
+      
+      -- Construct PowerShell command based on Force parameter
+      LET ps_cmd = 
+          IF(condition=Force, 
+             then="Remove-Item -Path '" + ExecutablePath + "' -Force", 
+             else="Remove-Item -Path '" + ExecutablePath + "'")
+      
+      -- Execute PowerShell deletion
+      LET deletion_result = SELECT * FROM execve(
+          argv=["powershell", "-Command", ps_cmd],
+          length=10000)
+      
+      -- Final result with detailed information
+      SELECT 
+          ExecutablePath AS Path,
+          path_check.FileName AS FileName,
+          path_check.size AS FileSize,
+          deletion_result.Stdout AS DeletionOutput,
+          deletion_result.Stderr AS DeletionErrors,
+          IF(condition=deletion_result.ReturnCode = 0, 
+             then="Success", 
+             else="Failed") AS DeletionStatus
+      FROM path_check
